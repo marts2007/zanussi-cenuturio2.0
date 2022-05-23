@@ -4,6 +4,8 @@ import logging
 import os.path
 import time
 import voluptuous as vol
+from .server import Status
+from threading import Thread
 
 from homeassistant.components.water_heater import WaterHeaterEntity, PLATFORM_SCHEMA, STATE_ELECTRIC, SUPPORT_OPERATION_MODE, SUPPORT_TARGET_TEMPERATURE,ATTR_OPERATION_MODE
 
@@ -33,7 +35,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     host=config.get(CONF_HOST)
     async_add_entities([ZanussiWH(
         hass, config, {}
-    )])    
+    )])
 
 
 class ZanussiWH(WaterHeaterEntity, RestoreEntity):
@@ -49,35 +51,46 @@ class ZanussiWH(WaterHeaterEntity, RestoreEntity):
         self._max_temp = 75
         self._attr_precision = PRECISION_WHOLE
 
-        self._target_temperature = self._min_temp
+        self._target_temperature = None
         self._operation_list = [
-            'OFF',
+            'off',
             '700W',
-            '1200W',
+            '1300W',
             '2000W'
         ]
-        self._current_operation = 'OFF'
+        self._current_operation = 'off'
 
         self._last_on_operation = None
         self._current_temperature = None
 
-        self._unit = hass.config.units.temperature_unit
 
+        self._unit = hass.config.units.temperature_unit
+        self._should_poll = False
         self._temp_lock = asyncio.Lock()
+        self.status = Status(self.update_me)
+        Thread(target=self.status.run_server, args=(), daemon=True).start();
 
         _LOGGER.warning('zanussi_wh_init_ok!')
+
+    def update_me(self):
+        self.update()
+        self.async_schedule_update_ha_state(True)
 
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
         await super().async_added_to_hass()
-    
+
         last_state = await self.async_get_last_state()
-        
+
         if last_state is not None:
             self._target_temperature = last_state.attributes['temperature']
 
             if 'last_on_operation' in last_state.attributes:
                 self._last_on_operation = last_state.attributes['last_on_operation']
+    @property
+    def should_poll(self):
+        """Return the polling state."""
+        return self._should_poll
 
     @property
     def max_temp(self):
@@ -165,7 +178,6 @@ class ZanussiWH(WaterHeaterEntity, RestoreEntity):
         self._current_operation = operation_mode
         await self.send_command()
         return
-        pass
 
     def set_temperature(self, **kwargs):
         _LOGGER.warning(**kwargs)
@@ -202,16 +214,27 @@ class ZanussiWH(WaterHeaterEntity, RestoreEntity):
                 _LOGGER.exception(e)
 
     async def send(self, packet):
-        for i in range(2):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((self._host, 8899))
-                s.send(bytes.fromhex(packet))
-            s.close()
-            time.sleep(1)
+        try:
+            for i in range(2):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((self._host, 8899))
+                    s.send(bytes.fromhex(packet))
+                s.close()
+                time.sleep(1)
+        except Exception as e:
+            _LOGGER.exception(e)
 
     async def async_turn_on(self):
         if not self._current_operation==self.operation_list[0]:
             await self.send_command()
 
+    def update(self):
+        self._current_temperature = self.status.temp
+        self._target_temperature = self.status.temp_target
+        if self.status.mode:
+            if self.status.mode in self._operation_list:
+                self._current_operation = self.status.mode
+            else:
+                _LOGGER.exception(f"{self.status.mode}mode not in list")
 
 
