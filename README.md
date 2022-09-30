@@ -13,4 +13,4 @@ add configuration option to configuration.yaml
 
 
 
-In order to get status updates, I have used mikrotiks`s packet sniffer with streaming option enabled (port 37008)
+In order to receive status updates, I used the mikrotic`s packet sniffer with the streaming feature enabled (port 37008) and the filtered by centruio mac address.
