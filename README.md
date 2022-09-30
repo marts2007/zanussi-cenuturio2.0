@@ -11,3 +11,6 @@ add configuration option to configuration.yaml
     host: ip_address_here
 ```
 
+
+
+In order to get status updates, I have used mikrotiks`s packet sniffer with streaming option enabled (port 37008)
